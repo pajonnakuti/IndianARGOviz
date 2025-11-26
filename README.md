@@ -1,38 +1,93 @@
-How to Run the Dashboard
-1. You must have Python installed
-Python is the software that runs your .py file.
-If you don’t have it, install it from the Python website.
+# How to Run the Dashboard
 
-2. Install the required Python libraries
-Your dashboard uses some tools like Streamlit, Pandas, Plotly, Matplotlib, and Cartopy.
-You install them one time using a command.
+This guide explains how to run the **Argo Dashboard** created using Python and Streamlit.
 
-3. Keep your dashboard file and data files together
-Your dashboard code (argo_dashboard.py) reads two CSV files.
-Make sure the file names and locations are correct so the code can find them.
+---
 
-4. Use Streamlit to open the dashboard
-You run a simple command in the Command Prompt
+## ⭐ 1. Install Python
+
+The dashboard runs using **Python**.
+
+* Download and install Python from the official website.
+* Make sure to check the box **“Add Python to PATH”** during installation.
+
+---
+
+## ⭐ 2. Install the Required Python Libraries
+
+Your dashboard uses several libraries:
+
+* Streamlit
+* Pandas
+* Plotly
+* Matplotlib
+* Cartopy
+
+Install them using this command:
+
+```bash
+pip install streamlit pandas plotly matplotlib cartopy
+```
+
+You only need to do this once.
+
+---
+
+## ⭐ 3. Keep Dashboard File and Data Files Together
+
+Your file:
+
+* `argo_dashboard.py`
+
+Your data files:
+
+* `total_dataset.csv`
+* `bio_dataset.csv`
+
+Make sure all files are in the **same folder** or update correct file paths in the code.
+
+---
+
+## ⭐ 4. Run the Dashboard Using Streamlit
+
+Use Command Prompt (Windows) or Terminal (Mac/Linux):
+
+```bash
 streamlit run argo_dashboard.py
-Streamlit will start the dashboard and open it in your browser.
+```
 
-5. The dashboard opens like a website
-You will see your charts, maps, tables, and filters on a web page.
-You can interact with the filters and see the results change instantly.
+Streamlit will launch the dashboard and open it in your browser.
 
-6. To stop the dashboard
-Close the browser tab and press CTRL + C in the Command Prompt.
+---
 
- Summary
-1.Running your dashboard is basically:
+## ⭐ 5. View and Use the Dashboard
 
-2.Install Python
+* The dashboard opens like a **webpage**.
+* You can interact with maps, charts, and tables.
+* Filters will update results instantly.
 
-3.Install required libraries
+---
 
-4.Put your files in the correct place
+## ⭐ 6. Stop the Dashboard
 
-5.Run the Streamlit command
+To stop Streamlit:
 
-6.View dashboard in the browser
+* Close the browser tab
+* Press **CTRL + C** in Command Prompt/Terminal
 
+---
+
+## ✅ Summary
+
+Running your dashboard involves:
+
+1. Install Python
+2. Install required libraries
+3. Place all files in correct folder
+4. Run Streamlit command
+5. View dashboard in browser
+6. Stop with CTRL + C
+
+---
+
+You are now ready to run your Argo Dashboard successfully! 🚀
