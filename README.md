@@ -37,7 +37,7 @@ You only need to do this once.
 
 Your file:
 
-* `argo_dashboard.py`
+* `/Code/argo_dashboard.py`
 
 Your data files:
 
