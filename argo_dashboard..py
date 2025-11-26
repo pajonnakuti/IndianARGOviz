@@ -14,8 +14,8 @@ from datetime import datetime
 # ------------------------------
 # UPDATE THESE PATHS if needed
 # ------------------------------
-TOTAL_CSV = r"C:\Users\medagam INDU\Desktop\total dataset.csv"
-BIO_CSV   = r"C:\Users\medagam INDU\Desktop\bio_dataset.csv"
+TOTAL_CSV = r"./total dataset.csv"
+BIO_CSV   = r"./bio_dataset.csv"
 
 # ------------------------------
 # Page setup
@@ -358,3 +358,4 @@ st.dataframe(summary_table, use_container_width=True)
 st.markdown("**Compact summary (DAC — Live / Dead / Total)**")
 for _, row in summary_table.iterrows():
     st.write(f"{row['DAC']} — {int(row['Live'])} / {int(row['Dead'])} / {int(row['Total'])}")
+
