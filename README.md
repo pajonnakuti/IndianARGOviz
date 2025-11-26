@@ -1,2 +1,0 @@
-# IndianARGOviz
-Indian ARGO Dashboard 
