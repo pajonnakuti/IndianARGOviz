@@ -41,8 +41,8 @@ Your file:
 
 Your data files:
 
-* `total_dataset.csv`
-* `bio_dataset.csv`
+* `/Data/total_dataset.csv`
+* `/Data/bio_dataset.csv`
 
 Make sure all files are in the **same folder** or update correct file paths in the code.
 
