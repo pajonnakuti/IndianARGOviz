@@ -431,6 +431,70 @@ def _bgc_wmo_set(_df_bio):
     return set(_df_bio["wmo_id"].dropna().unique())
 
 
+# ==================== LAUNCH DATE HELPERS ====================
+
+def _read_launch_date_from_nc(meta_path):
+    """Read LAUNCH_DATE from a single float meta NetCDF. Returns 14-char string or None."""
+    try:
+        ds = xr.open_dataset(meta_path)
+        if "LAUNCH_DATE" not in ds:
+            ds.close()
+            return None
+        raw = ds.LAUNCH_DATE.values
+        ds.close()
+        if hasattr(raw, "item"):
+            try:
+                raw = raw.item()
+            except Exception:
+                pass
+        if isinstance(raw, bytes):
+            return raw.decode("utf-8", errors="ignore").strip()
+        return str(raw).strip()
+    except Exception:
+        return None
+
+
+def _load_launch_date_csv(launch_csv):
+    """Load incois_launch_dates.csv, returning empty DataFrame on error."""
+    if not launch_csv.exists():
+        return pd.DataFrame(columns=["wmo_id", "launch_date"])
+    try:
+        df = pd.read_csv(launch_csv, dtype=str)
+        df["wmo_id"] = df["wmo_id"].str.strip()
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["wmo_id", "launch_date"])
+
+
+def _scan_existing_nc_for_launch_dates(incois_wmo_set, launch_csv):
+    """
+    Scan already-downloaded more_components/{wmo}_meta.nc files and extract
+    LAUNCH_DATE for any INCOIS float not yet in the CSV.
+    Returns count of NEW entries added.
+    """
+    target_dir = BASE_DIR / "more_components"
+    if not target_dir.exists():
+        return 0
+    existing = _load_launch_date_csv(launch_csv)
+    already_have = set(existing["wmo_id"].tolist())
+    new_rows = []
+    for wmo in incois_wmo_set:
+        if wmo in already_have:
+            continue
+        meta_path = target_dir / f"{wmo}_meta.nc"
+        if not meta_path.exists():
+            continue
+        ld = _read_launch_date_from_nc(meta_path)
+        if ld and len(ld) >= 8:
+            new_rows.append({"wmo_id": wmo, "launch_date": ld})
+    if new_rows:
+        CACHE_DIR.mkdir(exist_ok=True)
+        updated = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True)
+        updated = updated.drop_duplicates("wmo_id")
+        updated.to_csv(launch_csv, index=False)
+    return len(new_rows)
+
+
 # ==================== LOAD DATA ====================
 with st.spinner("🌊 Initialising ARGO Dashboard …"):
     df_prof = load_profile_data()
@@ -555,24 +619,42 @@ def show_float_details(wmo):
                 cycle_age = "N/A"
                 
             try:
-                pres_data = ds_prof.PRES.values
-                valid_cycles = np.where(~np.isnan(pres_data).all(axis=1))[0]
-                if len(valid_cycles) > 0:
-                    last_valid_idx = valid_cycles[-1]
-                    last_pres = pres_data[last_valid_idx]
-                    last_temp = ds_prof.TEMP.values[last_valid_idx] if 'TEMP' in ds_prof else np.full_like(last_pres, np.nan)
-                    last_psal = ds_prof.PSAL.values[last_valid_idx] if 'PSAL' in ds_prof else np.full_like(last_pres, np.nan)
-                    
-                    valid_idx = ~np.isnan(last_pres)
-                    pres_v = last_pres[valid_idx]
-                    temp_v = last_temp[valid_idx]
-                    psal_v = last_psal[valid_idx]
-                    
-                    if len(pres_v) > 0:
-                        surface_idx = np.argmin(pres_v)
-                        bottom_idx = np.argmax(pres_v)
-                        surf_data = f"{pres_v[surface_idx]:.2f} dbar {temp_v[surface_idx]:.3f}°C {psal_v[surface_idx]:.3f} PSU"
-                        bott_data = f"{pres_v[bottom_idx]:.2f} dbar {temp_v[bottom_idx]:.3f}°C {psal_v[bottom_idx]:.3f} PSU"
+                def get_ds_var(name):
+                    adj_name = f"{name}_ADJUSTED"
+                    if adj_name in ds_prof:
+                        val = ds_prof[adj_name].values
+                        if not np.isnan(val).all():
+                            return val
+                    if name in ds_prof:
+                        return ds_prof[name].values
+                    return None
+
+                pres_data = get_ds_var('PRES')
+                if pres_data is not None:
+                    valid_cycles = np.where(~np.isnan(pres_data).all(axis=1))[0]
+                    if len(valid_cycles) > 0:
+                        last_valid_idx = valid_cycles[-1]
+                        last_pres = pres_data[last_valid_idx]
+                        
+                        temp_data = get_ds_var('TEMP')
+                        last_temp = temp_data[last_valid_idx] if temp_data is not None else np.full_like(last_pres, np.nan)
+                        
+                        psal_data = get_ds_var('PSAL')
+                        last_psal = psal_data[last_valid_idx] if psal_data is not None else np.full_like(last_pres, np.nan)
+                        
+                        valid_idx = ~np.isnan(last_pres)
+                        pres_v = last_pres[valid_idx]
+                        temp_v = last_temp[valid_idx]
+                        psal_v = last_psal[valid_idx]
+                        
+                        if len(pres_v) > 0:
+                            surface_idx = np.argmin(pres_v)
+                            bottom_idx = np.argmax(pres_v)
+                            surf_data = f"{pres_v[surface_idx]:.2f} dbar {temp_v[surface_idx]:.3f}°C {psal_v[surface_idx]:.3f} PSU"
+                            bott_data = f"{pres_v[bottom_idx]:.2f} dbar {temp_v[bottom_idx]:.3f}°C {psal_v[bottom_idx]:.3f} PSU"
+                        else:
+                            surf_data = "N/A"
+                            bott_data = "N/A"
                     else:
                         surf_data = "N/A"
                         bott_data = "N/A"
@@ -682,29 +764,29 @@ def show_float_details(wmo):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     fig = plot_utils.create_ts_diagram(cycles, temp, psal, wmo)
-                    st.pyplot(fig, clear_figure=True)
+                    st.plotly_chart(fig, use_container_width=True)
                 with c2:
                     fig = plot_utils.create_section_chart(dates, pres, temp, "Temperature (°C)", "Section chart TEMP", wmo)
-                    st.pyplot(fig, clear_figure=True)
+                    st.plotly_chart(fig, use_container_width=True)
                 with c3:
                     fig = plot_utils.create_section_chart(dates, pres, psal, "Salinity (PSU)", "Section chart PSAL", wmo)
-                    st.pyplot(fig, clear_figure=True)
+                    st.plotly_chart(fig, use_container_width=True)
                     
                 c4, c5, c6 = st.columns(3)
                 with c4:
                     fig = plot_utils.create_section_chart(dates, pres, rho, "Potential Density (kg/m³)", "Section chart RHO", wmo)
-                    st.pyplot(fig, clear_figure=True)
+                    st.plotly_chart(fig, use_container_width=True)
                 with c5:
                     fig = plot_utils.create_overlaid_profiles(temp, pres, cycles, "Temperature (°C)", "Overlaid profiles TEMP", wmo)
-                    st.pyplot(fig, clear_figure=True)
+                    st.plotly_chart(fig, use_container_width=True)
                 with c6:
                     fig = plot_utils.create_overlaid_profiles(psal, pres, cycles, "Salinity (PSU)", "Overlaid profiles PSAL", wmo)
-                    st.pyplot(fig, clear_figure=True)
+                    st.plotly_chart(fig, use_container_width=True)
                     
                 c7, c8, c9 = st.columns(3)
                 with c7:
                     fig = plot_utils.create_overlaid_profiles(rho, pres, cycles, "Potential Density (kg/m³)", "Overlaid profiles RHO", wmo)
-                    st.pyplot(fig, clear_figure=True)
+                    st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No valid profile data available for technical plots.")
         except Exception as e:
@@ -1529,9 +1611,9 @@ with col_fleet:
 st.markdown("---")
 col_dac1, col_dac2 = st.columns(2, gap="medium")
 
-if len(filt_prof) > 0:
+if len(df_prof) > 0:
     dac_profs = (
-        filt_prof.groupby("institution")
+        df_prof.groupby("institution")
         .agg(Profiles=("file", "count"))
         .reset_index()
     )
@@ -1565,9 +1647,9 @@ if len(filt_prof) > 0:
 
     with col_dac2:
         st.markdown("### 📡 Float Status Summary")
-        latest_date = filt_prof["date"].max()
+        latest_date = df_prof["date"].max()
         ninety_days_ago = pd.Timestamp(latest_date - timedelta(days=90))
-        float_latest = filt_prof.dropna(subset=["date"]).groupby(["institution", "wmo_id"])["date"].max().reset_index()
+        float_latest = df_prof.dropna(subset=["date"]).groupby(["institution", "wmo_id"])["date"].max().reset_index()
         float_latest["is_live"] = float_latest["date"] >= ninety_days_ago
         
         live_df = float_latest.groupby("institution").agg(
@@ -1615,100 +1697,227 @@ else:
     st.info("No data available for summary tables.")
 
 # ================================================================
-#  ROW 4 — INCOIS Deployment Matrix (Month vs Year)
+#  ROW 4 — INCOIS Deployment Matrix (Year vs Month)
 # ================================================================
 st.markdown("---")
-st.markdown("### 🗓️ INCOIS Float Deployments (Month vs Year)")
+st.markdown("### 🗓️ INCOIS Float Deployments (Year vs Month)")
 
-if len(df_prof) > 0:
-    incois_df = df_prof[df_prof["institution"] == "IN"]
-    if len(incois_df) > 0:
-        # Find the deployment date (earliest profile date per float)
-        deployments = incois_df.groupby("wmo_id")["date"].min().reset_index()
-        
-        # Merge with all registered INCOIS floats to capture ones that haven't profiled
-        meta_in = df_meta[df_meta["institution"] == "IN"].copy()
-        merged = pd.merge(meta_in, deployments, on="wmo_id", how="left")
-        
-        # If float hasn't profiled, fallback to metadata registration date (date_update)
-        merged["date_update"] = pd.to_datetime(merged["date_update"], format="%Y%m%d%H%M%S", errors='coerce')
-        merged["date_final"] = merged["date"].fillna(merged["date_update"])
-        
-        merged["Year"] = merged["date_final"].dt.year
-        merged["Month"] = merged["date_final"].dt.month
-        
-        # Create a pivot table: Months as rows, Years as columns
-        pivot = merged.pivot_table(
-            index="Month", 
-            columns="Year", 
-            values="wmo_id", 
-            aggfunc="count", 
-            fill_value=0
+if len(df_meta) > 0:
+    # --- All INCOIS floats from the authoritative metadata registry ---
+    # FIX 1: Use both DAC and institution to catch all INCOIS floats
+    meta_in = df_meta[
+        (df_meta["dac"].str.lower().str.strip() == "incois") | 
+        (df_meta["institution"].str.upper().str.strip() == "IN")
+    ].drop_duplicates(subset=["wmo_id"]).copy()
+    
+    meta_in["wmo_id"] = meta_in["wmo_id"].astype(str).str.strip()
+
+    if len(meta_in) > 0:
+        launch_csv    = CACHE_DIR / "incois_launch_dates.csv"
+        incois_wmos   = set(meta_in["wmo_id"].tolist())
+
+        # ------------------------------------------------------------------
+        # STEP 1 — Silently absorb any already-downloaded meta NC files.
+        # ------------------------------------------------------------------
+        _scan_existing_nc_for_launch_dates(incois_wmos, launch_csv)
+
+        # ------------------------------------------------------------------
+        # STEP 2 — Load the CSV cache
+        # FIX 2: Drop duplicates to prevent overcounting in pivot table
+        # ------------------------------------------------------------------
+        ld_raw = _load_launch_date_csv(launch_csv).drop_duplicates(subset=["wmo_id"], keep="first")
+        ld_raw["launch_date_parsed"] = pd.to_datetime(
+            ld_raw["launch_date"], format="%Y%m%d%H%M%S", errors="coerce"
         )
-        
-        # Ensure all 12 months are displayed
-        all_months = range(1, 13)
-        pivot = pivot.reindex(all_months, fill_value=0)
-        
-        month_names = {
-            1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
-            7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
+        launch_dates = ld_raw[["wmo_id", "launch_date_parsed"]]
+
+        cached_wmos = set(launch_dates["wmo_id"].tolist())
+        missing_wmos = sorted(incois_wmos - cached_wmos)
+
+        # ------------------------------------------------------------------
+        # STEP 3 — Optional fetch button for floats whose NC files have
+        # never been downloaded.
+        # ------------------------------------------------------------------
+        if missing_wmos:
+            _dac_lookup = (
+                df_meta[df_meta["wmo_id"].isin(missing_wmos)]
+                .set_index("wmo_id")["dac"]
+                .to_dict()
+            )
+
+            with st.expander(
+                f"⚠️  Launch dates missing for **{len(missing_wmos)}** floats — click to fetch from GDAC",
+                expanded=False,
+            ):
+                st.caption(
+                    "This fetches each float's `_meta.nc` from IFREMER GDAC over HTTPS and "
+                    "caches the `LAUNCH_DATE` field locally. Run once; results are saved to "
+                    f"`{launch_csv.name}` and reused on every subsequent load."
+                )
+                if st.button("🌐  Fetch Missing Launch Dates from GDAC", key="fetch_launch_dates"):
+                    import urllib.request as _urlreq
+
+                    target_dir = BASE_DIR / "more_components"
+                    target_dir.mkdir(exist_ok=True)
+
+                    existing_csv = _load_launch_date_csv(launch_csv)
+                    new_rows  = []
+                    failed    = []
+                    prog      = st.progress(0.0)
+                    status_ph = st.empty()
+                    total     = len(missing_wmos)
+
+                    for idx, wmo in enumerate(missing_wmos, 1):
+                        status_ph.markdown(f"Fetching **{wmo}** &nbsp;({idx}/{total})…")
+                        prog.progress(idx / total)
+
+                        meta_path = target_dir / f"{wmo}_meta.nc"
+                        dac = _dac_lookup.get(wmo, "incois")
+
+                        if not meta_path.exists():
+                            url = f"https://data-argo.ifremer.fr/dac/{dac}/{wmo}/{wmo}_meta.nc"
+                            try:
+                                _urlreq.urlretrieve(url, meta_path)
+                            except Exception as e:
+                                failed.append((wmo, str(e)))
+                                continue
+
+                        ld = _read_launch_date_from_nc(meta_path)
+                        if ld and len(ld) >= 8:
+                            new_rows.append({"wmo_id": wmo, "launch_date": ld})
+                        else:
+                            failed.append((wmo, "LAUNCH_DATE not found in NetCDF"))
+
+                    prog.empty()
+                    status_ph.empty()
+
+                    if new_rows:
+                        CACHE_DIR.mkdir(exist_ok=True)
+                        updated = pd.concat(
+                            [existing_csv, pd.DataFrame(new_rows)], ignore_index=True
+                        ).drop_duplicates("wmo_id")
+                        updated.to_csv(launch_csv, index=False)
+                        st.success(f"✅  Cached launch dates for {len(new_rows)} floats. {len(failed)} could not be fetched.")
+                        st.rerun()
+                    else:
+                        st.error(f"Could not fetch any new launch dates. {len(failed)} failures.")
+
+        # ------------------------------------------------------------------
+        # STEP 4 — Determine deployment date for every INCOIS float.
+        # ------------------------------------------------------------------
+        earliest_profile = (
+            df_prof[df_prof["wmo_id"].isin(incois_wmos)]
+            .groupby("wmo_id")["date"]
+            .min()
+            .reset_index()
+            .rename(columns={"date": "earliest_profile_date"})
+        )
+        earliest_profile["wmo_id"] = earliest_profile["wmo_id"].astype(str).str.strip()
+
+        merged = meta_in[["wmo_id"]].copy()
+        merged = pd.merge(merged, launch_dates,    on="wmo_id", how="left")
+        merged = pd.merge(merged, earliest_profile, on="wmo_id", how="left")
+        merged["deploy_date"] = merged["launch_date_parsed"].fillna(merged["earliest_profile_date"])
+
+        n_true    = int(merged["launch_date_parsed"].notna().sum())
+        n_proxy   = int((merged["launch_date_parsed"].isna() & merged["earliest_profile_date"].notna()).sum())
+        n_unknown = int(merged["deploy_date"].isna().sum())
+
+        merged = merged.dropna(subset=["deploy_date"])
+        merged["Year"]  = merged["deploy_date"].dt.year.astype(int)
+        merged["Month"] = merged["deploy_date"].dt.month.astype(int)
+
+        # ------------------------------------------------------------------
+        # STEP 5 — Pivot: one row per year, one column per month.
+        # ------------------------------------------------------------------
+        pivot = merged.pivot_table(
+            index="Year", columns="Month", values="wmo_id",
+            aggfunc="count", fill_value=0,
+        )
+        pivot = pivot.reindex(columns=range(1, 13), fill_value=0)
+
+        MONTH_NAMES = {
+            1:"JAN", 2:"FEB", 3:"MAR", 4:"APR", 5:"MAY",  6:"JUN",
+            7:"JUL", 8:"AUG", 9:"SEP", 10:"OCT", 11:"NOV", 12:"DEC",
         }
-        pivot.index = pivot.index.map(month_names)
-        
-        # Calculate Row and Column Totals
-        pivot["Total"] = pivot.sum(axis=1)
+        pivot.columns    = [MONTH_NAMES[m] for m in pivot.columns]
+        pivot["Total"]   = pivot.sum(axis=1)
         pivot.loc["Total"] = pivot.sum(axis=0)
-        
-        total_in_floats = int(pivot.loc["Total", "Total"])
-        
-        st.markdown(f"<p style='color: #c8d6e5; font-size: 1rem;'>Total INCOIS Floats Registered: <strong style='color: #00BCD4; font-size: 1.2rem;'>{total_in_floats:,}</strong></p>", unsafe_allow_html=True)
-        
-        st.markdown('<div class="stPlotlyChart">', unsafe_allow_html=True)
-        
-        # Build HTML for the table
-        header_html = "<th>Month</th>" + "".join([f"<th>{y if isinstance(y, str) else int(y)}</th>" for y in pivot.columns])
-        
-        body_html = ""
-        for month in pivot.index:
-            is_total_row = (month == "Total")
-            row_bg = "background: rgba(0,188,212,0.06);" if is_total_row else ""
-            row_html = f"<td style='font-weight:bold; color:#00BCD4;'>{month}</td>"
-            for col in pivot.columns:
-                val = pivot.loc[month, col]
-                val_str = f"{int(val):,}" if val > 0 else "<span style='color:rgba(255,255,255,0.2)'>-</span>"
-                
-                is_total_col = (col == "Total")
-                style = ""
-                if is_total_row or is_total_col:
-                    style = "font-weight:bold; color:#FFB74D;"
-                # Highlight Pending column slightly
-                if col == "Pending" and val > 0:
-                    style += " color:#EF5350;"
-                    
-                row_html += f"<td style='{style}'>{val_str}</td>"
-            body_html += f"<tr style='{row_bg}'>{row_html}</tr>"
-            
+        total_floats     = int(pivot.loc["Total", "Total"])
+
+        # ------------------------------------------------------------------
+        # STEP 6 — Render
+        # ------------------------------------------------------------------
+        badge_parts = [
+            f"<span style='color:#8BC34A'>✓ {n_true} true launch dates</span>",
+            f"<span style='color:#FFB74D'>~ {n_proxy} profile-date proxy</span>",
+        ]
+        if n_unknown:
+            badge_parts.append(f"<span style='color:#EF5350'>✗ {n_unknown} unknown (excluded)</span>")
+
+        proxy_pct = round(100 * n_proxy / max(n_true + n_proxy, 1))
+        if proxy_pct > 20 and n_unknown > 0:
+            st.warning(f"⚠️  {n_unknown} floats have no date source. Click the **Fetch Missing Launch Dates** expander above to fix this.")
+
         st.markdown(
-            f'''
-            <div style="overflow-x:auto;">
-            <table class="dac-table" style="width:100%; text-align:center;">
-                <thead><tr>{header_html}</tr></thead>
-                <tbody>
-                    {body_html}
-                </tbody>
+            f"<p style='color:#c8d6e5; font-size:1rem; margin-bottom:6px;'>"
+            f"Total Deployed INCOIS Floats: "
+            f"<strong style='color:#00BCD4; font-size:1.2rem;'>{total_floats:,}</strong>"
+            f" &nbsp;·&nbsp; <span style='font-size:0.8rem;'>"
+            + " &nbsp;|&nbsp; ".join(badge_parts)
+            + "</span></p>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="stPlotlyChart">', unsafe_allow_html=True)
+
+        header_html = (
+            "<th style='position:sticky;left:0;background:#060b19;z-index:2;min-width:60px;'>Year</th>"
+            + "".join(f"<th style='min-width:48px;'>{m}</th>" for m in pivot.columns)
+        )
+
+        body_html = ""
+        for year in pivot.index:
+            is_total_row = year == "Total"
+            row_bg  = "background:rgba(0,188,212,0.06);" if is_total_row else ""
+            yr_lbl  = "Total" if is_total_row else int(year)
+            yr_bg   = "#0c1427" if is_total_row else "#060b19"
+
+            row_html = (
+                f"<td style='position:sticky;left:0;background:{yr_bg};"
+                f"z-index:1;font-weight:bold;color:#00BCD4;'>{yr_lbl}</td>"
+            )
+            for col in pivot.columns:
+                val     = pivot.loc[year, col]
+                is_tot  = is_total_row or col == "Total"
+                style   = "font-weight:bold;color:#FFB74D;" if is_tot else ""
+                cell    = (
+                    f"{int(val):,}" if val > 0
+                    else "<span style='color:rgba(255,255,255,0.18)'>-</span>"
+                )
+                row_html += f"<td style='{style}'>{cell}</td>"
+            body_html += f"<tr style='{row_bg}'>{row_html}</tr>"
+
+        st.markdown(
+            f"""
+            <div style="overflow-x:auto;max-height:600px;overflow-y:auto;
+                        border:1px solid rgba(255,255,255,0.1);border-radius:8px;">
+            <table class="dac-table"
+                   style="width:100%;text-align:center;border-collapse:collapse;">
+                <thead style='position:sticky;top:0;background:#060b19;z-index:3;'>
+                    <tr>{header_html}</tr>
+                </thead>
+                <tbody>{body_html}</tbody>
             </table>
             </div>
-            ''',
-            unsafe_allow_html=True
+            """,
+            unsafe_allow_html=True,
         )
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No INCOIS deployment data found.")
 else:
     st.info("No data available for deployment matrix.")
-
-
 # ================================================================
 #  RAW DATA VIEWER (bonus — not in PRD but useful for ops)
 # ================================================================
