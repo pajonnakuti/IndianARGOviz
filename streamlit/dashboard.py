@@ -505,6 +505,11 @@ with st.spinner("🌊 Initialising ARGO Dashboard …"):
 # Derived column: is this float a BGC float?
 df_prof["is_bgc"] = df_prof["wmo_id"].isin(bgc_wmos)
 
+wmos_with_doxy = set(df_bio[df_bio["has_doxy"]]["wmo_id"].dropna().unique()) if "has_doxy" in df_bio.columns else set()
+wmos_with_chla = set(df_bio[df_bio["has_chla"]]["wmo_id"].dropna().unique()) if "has_chla" in df_bio.columns else set()
+wmos_with_nitrate = set(df_bio[df_bio["has_nitrate"]]["wmo_id"].dropna().unique()) if "has_nitrate" in df_bio.columns else set()
+wmos_with_ph = set(df_bio[df_bio["has_ph"]]["wmo_id"].dropna().unique()) if "has_ph" in df_bio.columns else set()
+
 # Enrich profiles with profiler_name from meta (authoritative per-float source)
 _meta_pname = df_meta.set_index("wmo_id")["profiler_name"]
 df_prof["profiler_name"] = df_prof["wmo_id"].map(_meta_pname).fillna("Unknown")
@@ -761,31 +766,38 @@ def show_float_details(wmo):
             cycles, dates, pres, temp, psal, rho = plot_utils.get_valid_data(ds_prof)
             
             if len(pres) > 0:
+                if len(dates) > 0:
+                    min_date = pd.to_datetime(np.nanmin(dates)).strftime('%d/%m/%Y')
+                    max_date = pd.to_datetime(np.nanmax(dates)).strftime('%d/%m/%Y')
+                    date_suffix = f"Argo float {wmo} between {min_date} and {max_date}"
+                else:
+                    date_suffix = f"Argo float {wmo}"
+                    
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    fig = plot_utils.create_ts_diagram(cycles, temp, psal, wmo)
+                    fig = plot_utils.create_ts_diagram(cycles, temp, psal, wmo, title=f"T/S Diagram<br><sup>{date_suffix}</sup>")
                     st.plotly_chart(fig, use_container_width=True)
                 with c2:
-                    fig = plot_utils.create_section_chart(dates, pres, temp, "Temperature (°C)", "Section chart TEMP", wmo)
+                    fig = plot_utils.create_section_chart(dates, pres, temp, "Temperature (°C)", f"Section chart TEMP<br><sup>{date_suffix}</sup>", wmo)
                     st.plotly_chart(fig, use_container_width=True)
                 with c3:
-                    fig = plot_utils.create_section_chart(dates, pres, psal, "Salinity (PSU)", "Section chart PSAL", wmo)
+                    fig = plot_utils.create_section_chart(dates, pres, psal, "Salinity (PSU)", f"Section chart PSAL<br><sup>{date_suffix}</sup>", wmo)
                     st.plotly_chart(fig, use_container_width=True)
                     
                 c4, c5, c6 = st.columns(3)
                 with c4:
-                    fig = plot_utils.create_section_chart(dates, pres, rho, "Potential Density (kg/m³)", "Section chart RHO", wmo)
+                    fig = plot_utils.create_section_chart(dates, pres, rho, "Potential Density (kg/m³)", f"Section chart RHO<br><sup>{date_suffix}</sup>", wmo)
                     st.plotly_chart(fig, use_container_width=True)
                 with c5:
-                    fig = plot_utils.create_overlaid_profiles(temp, pres, cycles, "Temperature (°C)", "Overlaid profiles TEMP", wmo)
+                    fig = plot_utils.create_overlaid_profiles(temp, pres, cycles, "Temperature (°C)", f"Overlaid profiles TEMP<br><sup>{date_suffix}</sup>", wmo)
                     st.plotly_chart(fig, use_container_width=True)
                 with c6:
-                    fig = plot_utils.create_overlaid_profiles(psal, pres, cycles, "Salinity (PSU)", "Overlaid profiles PSAL", wmo)
+                    fig = plot_utils.create_overlaid_profiles(psal, pres, cycles, "Salinity (PSU)", f"Overlaid profiles PSAL<br><sup>{date_suffix}</sup>", wmo)
                     st.plotly_chart(fig, use_container_width=True)
                     
                 c7, c8, c9 = st.columns(3)
                 with c7:
-                    fig = plot_utils.create_overlaid_profiles(rho, pres, cycles, "Potential Density (kg/m³)", "Overlaid profiles RHO", wmo)
+                    fig = plot_utils.create_overlaid_profiles(rho, pres, cycles, "Potential Density (kg/m³)", f"Overlaid profiles RHO<br><sup>{date_suffix}</sup>", wmo)
                     st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No valid profile data available for technical plots.")
@@ -836,6 +848,17 @@ with st.sidebar:
         value=qp.get("wmo", ""),
         placeholder="e.g. 2902115, 2902116",
         help="Comma-separated WMO numbers",
+    )
+
+    # ── Parameter Filter ──
+    st.markdown("### Parameters")
+    _param_options = ["Pressure", "Temperature", "Salinity", "Oxygen (DOXY)", "Chlorophyll (Chla)", "Nitrate", "pH"]
+    selected_params = st.multiselect(
+        "🔎 Search by Parameters",
+        options=_param_options,
+        default=[],
+        placeholder="Select parameters",
+        help="Filter floats that have these parameters"
     )
 
     # ── QC Mode ──
@@ -1023,6 +1046,19 @@ def apply_filters(df, *, is_bio=False):
     if selected_profiler_types and "profiler_name" in out.columns:
         out = out[out["profiler_name"].isin(selected_profiler_types)]
 
+    # Parameter filtering
+    if selected_params:
+        wmo_mask = pd.Series(True, index=out.index)
+        if "Oxygen (DOXY)" in selected_params:
+            wmo_mask &= out["wmo_id"].isin(wmos_with_doxy)
+        if "Chlorophyll (Chla)" in selected_params:
+            wmo_mask &= out["wmo_id"].isin(wmos_with_chla)
+        if "Nitrate" in selected_params:
+            wmo_mask &= out["wmo_id"].isin(wmos_with_nitrate)
+        if "pH" in selected_params:
+            wmo_mask &= out["wmo_id"].isin(wmos_with_ph)
+        out = out[wmo_mask]
+
     return out
 
 
@@ -1065,7 +1101,14 @@ col_left, col_right = st.columns([55, 45], gap="medium")
 with col_left:
     # ── Component 1: Geospatial Float Position Map (PRD §7.1) ──
     st.markdown('<div class="stPlotlyChart">', unsafe_allow_html=True)
-    st.markdown("### 📍 Geographic Float Positions")
+    c_title, c_btn = st.columns([7, 3])
+    with c_title:
+        st.markdown("### 📍 Geographic Float Positions")
+    with c_btn:
+        if st.button("🏠 Reset Map Data", use_container_width=True):
+            if "main_map" in st.session_state:
+                del st.session_state["main_map"]
+            st.rerun()
 
     if len(filt_prof) > 0:
         # --- Check map selection from session state ---
@@ -1080,12 +1123,23 @@ with col_left:
         is_sidebar_search = bool(search_wmo.strip())
         is_wmo_searched = is_sidebar_search or bool(selected_wmo_from_map)
 
+        selected_dac_from_bar = None
+        if "bar_chart" in st.session_state:
+            sel = st.session_state.bar_chart
+            if sel and "selection" in sel and "points" in sel["selection"] and len(sel["selection"]["points"]) > 0:
+                pt = sel["selection"]["points"][0]
+                if "customdata" in pt and len(pt["customdata"]) > 0:
+                    selected_dac_from_bar = str(pt["customdata"][0])
+
         # Apply Live-Only filter if toggled and not searching specific WMOs
         map_source = filt_prof.copy()
         
         # If user clicked a float on the map, filter source to just that float
         if selected_wmo_from_map:
             map_source = map_source[map_source["wmo_id"] == selected_wmo_from_map]
+            
+        if selected_dac_from_bar:
+            map_source = map_source[map_source["dac"] == selected_dac_from_bar]
 
         if show_live_only and not is_wmo_searched:
             latest_d = map_source["date"].max()
@@ -1137,7 +1191,17 @@ with col_left:
                 plot_bgcolor="rgba(0,0,0,0)",
                 margin=dict(l=0, r=0, t=0, b=0),
                 mapbox=dict(
-                    style="carto-darkmatter",
+                    style="white-bg",
+                    layers=[
+                        {
+                            "below": 'traces',
+                            "sourcetype": "raster",
+                            "sourceattribution": "Esri",
+                            "source": [
+                                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                            ]
+                        }
+                    ],
                     center=dict(lat=center_lat, lon=center_lon), 
                     zoom=4
                 ),
@@ -1187,7 +1251,17 @@ with col_left:
             )
             fig_map.update_traces(marker=dict(size=8, opacity=0.9))
             fig_map.update_layout(
-                mapbox_style="carto-darkmatter",
+                mapbox_style="white-bg",
+                mapbox_layers=[
+                    {
+                        "below": 'traces',
+                        "sourcetype": "raster",
+                        "sourceattribution": "Esri",
+                        "source": [
+                            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                        ]
+                    }
+                ],
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 margin=dict(l=0, r=0, t=0, b=0),
@@ -1228,7 +1302,14 @@ with col_left:
 with col_right:
     st.markdown('<div class="stPlotlyChart">', unsafe_allow_html=True)
     # ── Bar chart (PRD §7.2) ──
-    st.markdown("### 📈 Number of Floats per DAC")
+    c_bar_title, c_bar_btn = st.columns([7, 3])
+    with c_bar_title:
+        st.markdown("### 📈 Number of Floats per DAC")
+    with c_bar_btn:
+        if st.button("🏠 Reset Chart Data", use_container_width=True):
+            if "bar_chart" in st.session_state:
+                del st.session_state["bar_chart"]
+            st.rerun()
 
     if len(filt_prof) > 0 and "dac" in filt_prof.columns:
         # Active floats in the last 90 days of each year
@@ -1266,6 +1347,7 @@ with col_right:
                 x="Year",
                 y="Count",
                 color="DAC",
+                custom_data=["DAC"],
                 color_discrete_map=DAC_COLORS,
                 category_orders={"Year": sorted(yearly["Year"].unique())}
             )
@@ -1297,7 +1379,7 @@ with col_right:
                     margin=dict(l=50, r=20, t=80, b=40),
                 )
             )
-            st.plotly_chart(fig_bar, use_container_width=True, key="bar_chart", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_annual_floats"}})
+            st.plotly_chart(fig_bar, use_container_width=True, key="bar_chart", on_select="rerun", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_annual_floats"}})
         else:
             st.info("No active float data for bar chart.")
     else:
@@ -1622,6 +1704,26 @@ if len(df_prof) > 0:
     dac = dac.sort_values("Profiles", ascending=False)
     
     dacs = dac["institution"].tolist()
+    
+    latest_date = df_prof["date"].max()
+    ninety_days_ago = pd.Timestamp(latest_date - timedelta(days=90))
+    float_latest = df_prof.dropna(subset=["date"]).groupby(["institution", "wmo_id"])["date"].max().reset_index()
+    float_latest["is_live"] = float_latest["date"] >= ninety_days_ago
+    
+    live_df = float_latest.groupby("institution").agg(
+        live_floats=("is_live", "sum")
+    ).reset_index()
+    
+    status_df = pd.merge(dac_floats.rename(columns={"Floats": "total_count"}), live_df, on="institution", how="left").fillna(0)
+    status_df["dead_floats"] = status_df["total_count"] - status_df["live_floats"]
+    status_df = status_df.set_index("institution").reindex(dacs).reset_index().fillna(0)
+    
+    # Global metrics for the graph
+    global_total_floats = status_df["total_count"].sum()
+    global_total_profiles = dac["Profiles"].sum()
+    global_live = status_df["live_floats"].sum()
+    global_dead = status_df["dead_floats"].sum()
+
     header = "".join(f"<th>{d}</th>" for d in dacs)
     floats_cells = "".join(f"<td>{int(r):,}</td>" for r in dac["Floats"])
     profs_cells = "".join(f"<td>{int(r):,}</td>" for r in dac["Profiles"])
@@ -1645,20 +1747,42 @@ if len(df_prof) > 0:
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("### 🌐 Global Network Status")
+        
+        metrics_df = pd.DataFrame({
+            "Metric": ["Active Floats", "Dead Floats", "Total Floats", "Total Profiles"],
+            "Count": [global_live, global_dead, global_total_floats, global_total_profiles],
+            "Color": ["#4CAF50", "#F44336", "#9C27B0", "#2196F3"]
+        })
+        
+        fig_global = px.bar(
+            metrics_df,
+            x="Count",
+            y="Metric",
+            orientation="h",
+            text="Count",
+            log_x=True,
+        )
+        fig_global.update_traces(
+            marker_color=metrics_df["Color"],
+            texttemplate='<b>%{text:,}</b>',
+            textposition='auto',
+            textfont=dict(color='white'),
+            hovertemplate="<b>%{y}</b>: %{x:,}<extra></extra>"
+        )
+        fig_global.update_layout(
+            **_dark_layout(
+                xaxis=dict(title="", showticklabels=False, showgrid=False, zeroline=False),
+                yaxis=dict(title="", showgrid=False, tickfont=dict(size=12, color="#c8d6e5")),
+                margin=dict(l=0, r=20, t=10, b=0),
+                height=160,
+            )
+        )
+        st.plotly_chart(fig_global, use_container_width=True, key="global_status_bar", config={"displayModeBar": False})
+
     with col_dac2:
         st.markdown("### 📡 Float Status Summary")
-        latest_date = df_prof["date"].max()
-        ninety_days_ago = pd.Timestamp(latest_date - timedelta(days=90))
-        float_latest = df_prof.dropna(subset=["date"]).groupby(["institution", "wmo_id"])["date"].max().reset_index()
-        float_latest["is_live"] = float_latest["date"] >= ninety_days_ago
-        
-        live_df = float_latest.groupby("institution").agg(
-            live_floats=("is_live", "sum")
-        ).reset_index()
-        
-        status_df = pd.merge(dac_floats.rename(columns={"Floats": "total_count"}), live_df, on="institution", how="left").fillna(0)
-        status_df["dead_floats"] = status_df["total_count"] - status_df["live_floats"]
-        status_df = status_df.set_index("institution").reindex(dacs).reset_index().fillna(0)
         
         # Dominant instrument per institution from meta registry
         _inst_top_model = (
