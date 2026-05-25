@@ -16,6 +16,7 @@ Components
 
 # ==================== IMPORTS ====================
 import streamlit as st
+import streamlit.components.v1 as components
 import os
 import pandas as pd
 import numpy as np
@@ -468,20 +469,19 @@ def _load_launch_date_csv(launch_csv):
 
 def _scan_existing_nc_for_launch_dates(incois_wmo_set, launch_csv):
     """
-    Scan already-downloaded more_components/{wmo}_meta.nc files and extract
-    LAUNCH_DATE for any INCOIS float not yet in the CSV.
+    Scan already-downloaded more_components/{wmo}_meta.nc or inactive_floats/{wmo}_meta.nc files
+    and extract LAUNCH_DATE for any INCOIS float not yet in the CSV.
     Returns count of NEW entries added.
     """
-    target_dir = BASE_DIR / "more_components"
-    if not target_dir.exists():
-        return 0
     existing = _load_launch_date_csv(launch_csv)
     already_have = set(existing["wmo_id"].tolist())
     new_rows = []
     for wmo in incois_wmo_set:
         if wmo in already_have:
             continue
-        meta_path = target_dir / f"{wmo}_meta.nc"
+        meta_path = BASE_DIR / f"more_components/{wmo}_meta.nc"
+        if not meta_path.exists():
+            meta_path = BASE_DIR / f"inactive_floats/{wmo}_meta.nc"
         if not meta_path.exists():
             continue
         ld = _read_launch_date_from_nc(meta_path)
@@ -516,8 +516,17 @@ df_prof["profiler_name"] = df_prof["wmo_id"].map(_meta_pname).fillna("Unknown")
 
 @st.dialog("Float Information", width="large")
 def show_float_details(wmo):
-    meta_path = BASE_DIR / f"more_components/{wmo}_meta.nc"
-    prof_path = BASE_DIR / f"more_components/{wmo}_prof.nc"
+    # Determine if active/inactive to set target folder
+    float_profiles = df_prof[df_prof["wmo_id"] == str(wmo)]
+    is_active = False
+    if not float_profiles.empty:
+        latest_prof_date = float_profiles["date"].max()
+        if latest_prof_date is not pd.NaT and latest_prof_date.year >= 2026:
+            is_active = True
+
+    folder_name = "more_components" if is_active else "inactive_floats"
+    meta_path = BASE_DIR / f"{folder_name}/{wmo}_meta.nc"
+    prof_path = BASE_DIR / f"{folder_name}/{wmo}_prof.nc"
     
     # Auto-download from IFREMER GDAC if files do not exist
     if not meta_path.exists() or not prof_path.exists():
@@ -529,13 +538,13 @@ def show_float_details(wmo):
         else:
             dac = "incois"  # fallback
             
-        meta_url = f"ftp://ftp.ifremer.fr/ifremer/argo/dac/{dac}/{wmo}/{wmo}_meta.nc"
-        prof_url = f"ftp://ftp.ifremer.fr/ifremer/argo/dac/{dac}/{wmo}/{wmo}_prof.nc"
+        meta_url = f"https://data-argo.ifremer.fr/dac/{dac}/{wmo}/{wmo}_meta.nc"
+        prof_url = f"https://data-argo.ifremer.fr/dac/{dac}/{wmo}/{wmo}_prof.nc"
         
-        target_dir = BASE_DIR / "more_components"
+        target_dir = BASE_DIR / folder_name
         target_dir.mkdir(exist_ok=True)
         
-        with st.spinner(f"Downloading GDAC NetCDF files for {wmo} ({dac})..."):
+        with st.spinner(f"Downloading GDAC NetCDF files for {wmo} ({dac}) to local {folder_name} folder..."):
             try:
                 if not meta_path.exists():
                     urllib.request.urlretrieve(meta_url, meta_path)
@@ -830,7 +839,97 @@ st.markdown(
 # Read URL query params for shareable filter state
 qp = st.query_params
 
+# ── Reset Trigger for Map Home Button ──
+st.markdown(
+    """
+    <style>
+    /* Hide the reset trigger input container completely */
+    div.element-container:has(input[placeholder="reset_trigger_placeholder"]) {
+        display: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+reset_trigger = st.text_input("", placeholder="reset_trigger_placeholder", key="reset_trigger")
+
+if reset_trigger == "true":
+    if "main_map" in st.session_state:
+        st.session_state.main_map = None
+    if "bar_chart" in st.session_state:
+        st.session_state.bar_chart = None
+    if "last_viewed_wmo" in st.session_state:
+        st.session_state.last_viewed_wmo = None
+    if "search_wmo_input" in st.session_state:
+        st.session_state.search_wmo_input = ""
+    st.query_params.update({"wmo": ""})
+    st.session_state.reset_trigger = ""
+    st.rerun()
+
+components.html(
+    """
+    <script>
+    (function() {
+        const parentDoc = window.parent.document;
+        const interval = setInterval(() => {
+            const resetButtons = parentDoc.querySelectorAll('.modebar-btn[data-val="reset"]');
+            if (resetButtons.length > 0) {
+                resetButtons.forEach(btn => {
+                    if (!btn.dataset.hasResetListener) {
+                        btn.dataset.hasResetListener = "true";
+                        btn.addEventListener('click', function(e) {
+                            const input = parentDoc.querySelector('input[placeholder="reset_trigger_placeholder"]');
+                            if (input) {
+                                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                nativeInputValueSetter.call(input, "true");
+                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                                input.blur();
+                            }
+                        });
+                    }
+                });
+            }
+        }, 500);
+    })();
+    </script>
+    """,
+    height=0,
+    width=0
+)
+
 with st.sidebar:
+    # ── circular logo ──
+    try:
+        import base64
+        logo_path = BASE_DIR / "incois_logo.jpg"
+        if logo_path.exists():
+            with open(logo_path, "rb") as f:
+                logo_data = base64.b64encode(f.read()).decode("utf-8")
+            st.markdown(
+                f"""
+                <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 20px;">
+                    <div style="
+                        width: 140px;
+                        height: 140px;
+                        border-radius: 50%;
+                        overflow: hidden;
+                        border: 4px solid #1f6feb;
+                        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+                        background-color: white;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                    ">
+                        <img src="data:image/jpeg;base64,{logo_data}" style="width: 100%; height: 100%; object-fit: cover;" />
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    except Exception as e:
+        pass
+
     st.markdown("## 🔍 Filters")
 
     # ── Refresh ──
@@ -848,6 +947,7 @@ with st.sidebar:
         value=qp.get("wmo", ""),
         placeholder="e.g. 2902115, 2902116",
         help="Comma-separated WMO numbers",
+        key="search_wmo_input",
     )
 
     # ── Parameter Filter ──
@@ -1101,14 +1201,7 @@ col_left, col_right = st.columns([55, 45], gap="medium")
 with col_left:
     # ── Component 1: Geospatial Float Position Map (PRD §7.1) ──
     st.markdown('<div class="stPlotlyChart">', unsafe_allow_html=True)
-    c_title, c_btn = st.columns([7, 3])
-    with c_title:
-        st.markdown("### 📍 Geographic Float Positions")
-    with c_btn:
-        if st.button("🏠 Reset Map Data", use_container_width=True):
-            if "main_map" in st.session_state:
-                del st.session_state["main_map"]
-            st.rerun()
+    st.markdown("### 📍 Geographic Float Positions")
 
     if len(filt_prof) > 0:
         # --- Check map selection from session state ---
@@ -1173,7 +1266,6 @@ with col_left:
                     lon=group["longitude"].tolist(),
                     mode="lines+markers+text",
                     text=group["profile_seq"].astype(str).tolist(),
-                    customdata=[[wmo]] * len(group),
                     textposition="top right",
                     textfont=dict(size=11, color="white"),
                     marker=dict(size=7, color=color, opacity=0.9),
@@ -1231,6 +1323,9 @@ with col_left:
             if len(map_df) > 12_000:
                 map_df = map_df.sample(12_000, random_state=42)
 
+            center_lat = float(map_df["latitude"].mean()) if len(map_df) > 0 else -10.0
+            center_lon = float(map_df["longitude"].mean()) if len(map_df) > 0 else 80.0
+            
             fig_map = px.scatter_mapbox(
                 map_df,
                 lat="latitude",
@@ -1246,10 +1341,11 @@ with col_left:
                     "longitude": ":.2f",
                 },
                 zoom=2,
-                center={"lat": -10, "lon": 80},
+                center={"lat": center_lat, "lon": center_lon},
                 category_orders={"institution": list(REGION_COLORS.keys())},
             )
             fig_map.update_traces(marker=dict(size=8, opacity=0.9))
+
             fig_map.update_layout(
                 mapbox_style="white-bg",
                 mapbox_layers=[
@@ -1302,14 +1398,7 @@ with col_left:
 with col_right:
     st.markdown('<div class="stPlotlyChart">', unsafe_allow_html=True)
     # ── Bar chart (PRD §7.2) ──
-    c_bar_title, c_bar_btn = st.columns([7, 3])
-    with c_bar_title:
-        st.markdown("### 📈 Number of Floats per DAC")
-    with c_bar_btn:
-        if st.button("🏠 Reset Chart Data", use_container_width=True):
-            if "bar_chart" in st.session_state:
-                del st.session_state["bar_chart"]
-            st.rerun()
+    st.markdown("### 📈 Number of Floats per DAC")
 
     if len(filt_prof) > 0 and "dac" in filt_prof.columns:
         # Active floats in the last 90 days of each year
@@ -1881,9 +1970,6 @@ if len(df_meta) > 0:
                 if st.button("🌐  Fetch Missing Launch Dates from GDAC", key="fetch_launch_dates"):
                     import urllib.request as _urlreq
 
-                    target_dir = BASE_DIR / "more_components"
-                    target_dir.mkdir(exist_ok=True)
-
                     existing_csv = _load_launch_date_csv(launch_csv)
                     new_rows  = []
                     failed    = []
@@ -1894,6 +1980,18 @@ if len(df_meta) > 0:
                     for idx, wmo in enumerate(missing_wmos, 1):
                         status_ph.markdown(f"Fetching **{wmo}** &nbsp;({idx}/{total})…")
                         prog.progress(idx / total)
+
+                        # Determine if active/inactive to set target folder
+                        float_profiles = df_prof[df_prof["wmo_id"] == str(wmo)]
+                        is_active = False
+                        if not float_profiles.empty:
+                            latest_prof_date = float_profiles["date"].max()
+                            if latest_prof_date is not pd.NaT and latest_prof_date.year >= 2026:
+                                is_active = True
+
+                        folder_name = "more_components" if is_active else "inactive_floats"
+                        target_dir = BASE_DIR / folder_name
+                        target_dir.mkdir(exist_ok=True)
 
                         meta_path = target_dir / f"{wmo}_meta.nc"
                         dac = _dac_lookup.get(wmo, "incois")
@@ -2001,6 +2099,14 @@ if len(df_meta) > 0:
         )
 
         body_html = ""
+        
+        # Calculate max value for heatmap scaling (excluding Totals)
+        try:
+            heatmap_max = pivot.drop("Total", axis=0).drop("Total", axis=1).max().max()
+        except:
+            heatmap_max = 1
+        if heatmap_max <= 0: heatmap_max = 1
+
         for year in pivot.index:
             is_total_row = year == "Total"
             row_bg  = "background:rgba(0,188,212,0.06);" if is_total_row else ""
@@ -2014,12 +2120,24 @@ if len(df_meta) > 0:
             for col in pivot.columns:
                 val     = pivot.loc[year, col]
                 is_tot  = is_total_row or col == "Total"
-                style   = "font-weight:bold;color:#FFB74D;" if is_tot else ""
+                
+                if is_tot:
+                    style = "font-weight:bold;color:#FFB74D;"
+                    cell_bg = ""
+                else:
+                    style = ""
+                    if val > 0:
+                        intensity = min(val / heatmap_max, 1.0)
+                        # Cyan color (#00BCD4) with dynamic opacity based on value
+                        cell_bg = f"background:rgba(0, 188, 212, {max(0.1, intensity * 0.9)});"
+                    else:
+                        cell_bg = ""
+
                 cell    = (
                     f"{int(val):,}" if val > 0
                     else "<span style='color:rgba(255,255,255,0.18)'>-</span>"
                 )
-                row_html += f"<td style='{style}'>{cell}</td>"
+                row_html += f"<td style='{style}{cell_bg}'>{cell}</td>"
             body_html += f"<tr style='{row_bg}'>{row_html}</tr>"
 
         st.markdown(
