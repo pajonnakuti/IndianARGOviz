@@ -3,3 +3,6 @@ pandas
 plotly
 matplotlib
 cartopy
+xarray
+netCDF4
+pyarrow
