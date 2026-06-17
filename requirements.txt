@@ -6,3 +6,5 @@ cartopy
 xarray
 netCDF4
 pyarrow
+gsw
+
