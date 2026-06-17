@@ -329,8 +329,11 @@ def load_profile_data():
     cache_path = CACHE_DIR / "profiles.parquet"
 
     if cache_path.exists():
-        age_h = (datetime.now().timestamp() - cache_path.stat().st_mtime) / 3600
-        if age_h < 24:
+        use_cache = not PROF_FILE.exists()
+        if not use_cache:
+            age_h = (datetime.now().timestamp() - cache_path.stat().st_mtime) / 3600
+            use_cache = age_h < 24
+        if use_cache:
             df = pd.read_parquet(cache_path)
             # Ensure is_deep exists (handles stale caches from before this column was added)
             if "is_deep" not in df.columns:
@@ -342,7 +345,7 @@ def load_profile_data():
     df = pd.read_csv(PROF_FILE, comment="#")
     # Strip whitespace from column names (GDAC files sometimes have spaces)
     df.columns = df.columns.str.strip()
-
+    
     # --- Land-mask filtering removed: caused discrepancies ---
     df = df.dropna(subset=["latitude", "longitude"])
     
@@ -351,7 +354,7 @@ def load_profile_data():
         (df["latitude"] >= -90) & (df["latitude"] <= 90) &
         (df["longitude"] >= -180) & (df["longitude"] <= 180)
     ]
-
+ 
     df["date"] = pd.to_datetime(df["date"], format="%Y%m%d%H%M%S", errors="coerce")
     if "date_update" in df.columns:
         df["date_update"] = pd.to_datetime(
@@ -361,52 +364,58 @@ def load_profile_data():
     df["dac"] = df["file"].str.extract(r"^([^/]+)/")
     df["year"] = df["date"].dt.year
     df["is_deep"] = df["profiler_type"].isin(DEEP_PROFILER_TYPES)
-
+ 
     df.to_parquet(cache_path, index=False)
     return df
-
-
+ 
+ 
 @st.cache_data(show_spinner="Loading BGC-profile index …")
 def load_bio_data():
     """Load argo_bio-profile_index.txt with Parquet cache (24-h TTL)."""
     CACHE_DIR.mkdir(exist_ok=True)
     cache_path = CACHE_DIR / "bgc_profiles.parquet"
-
+ 
     if cache_path.exists():
-        age_h = (datetime.now().timestamp() - cache_path.stat().st_mtime) / 3600
-        if age_h < 24:
+        use_cache = not BIO_FILE.exists()
+        if not use_cache:
+            age_h = (datetime.now().timestamp() - cache_path.stat().st_mtime) / 3600
+            use_cache = age_h < 24
+        if use_cache:
             return pd.read_parquet(cache_path)
-
+ 
     df = pd.read_csv(BIO_FILE, comment="#")
     df.columns = df.columns.str.strip()
-
+ 
     df["date"] = pd.to_datetime(df["date"], format="%Y%m%d%H%M%S", errors="coerce")
     df["wmo_id"] = df["file"].str.extract(r"/(\d+)/")
     df["year"] = df["date"].dt.year
-
+ 
     params_upper = df["parameters"].fillna("").str.upper()
     df["has_doxy"] = params_upper.str.contains("DOXY")
     df["has_chla"] = params_upper.str.contains("CHLA")
     df["has_nitrate"] = params_upper.str.contains("NITRATE")
     df["has_ph"] = params_upper.str.contains("PH_IN_SITU")
-
+ 
     df.to_parquet(cache_path, index=False)
     return df
-
-
+ 
+ 
 @st.cache_data(show_spinner="Loading float metadata index …")
 def load_meta_data():
     """Load ar_index_global_meta.txt with Parquet cache (24-h TTL).
-
+ 
     Provides one row per float (WMO) with profiler_type, institution,
     dac, and a human-readable profiler_name from WMO R08.
     """
     CACHE_DIR.mkdir(exist_ok=True)
     cache_path = CACHE_DIR / "meta.parquet"
-
+ 
     if cache_path.exists():
-        age_h = (datetime.now().timestamp() - cache_path.stat().st_mtime) / 3600
-        if age_h < 24:
+        use_cache = not META_FILE.exists()
+        if not use_cache:
+            age_h = (datetime.now().timestamp() - cache_path.stat().st_mtime) / 3600
+            use_cache = age_h < 24
+        if use_cache:
             return pd.read_parquet(cache_path)
 
     df = pd.read_csv(META_FILE, comment="#")
@@ -785,29 +794,29 @@ def show_float_details(wmo):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     fig = plot_utils.create_ts_diagram(cycles, temp, psal, wmo, title=f"T/S Diagram<br><sup>{date_suffix}</sup>")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 with c2:
                     fig = plot_utils.create_section_chart(dates, pres, temp, "Temperature (°C)", f"Section chart TEMP<br><sup>{date_suffix}</sup>", wmo)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 with c3:
                     fig = plot_utils.create_section_chart(dates, pres, psal, "Salinity (PSU)", f"Section chart PSAL<br><sup>{date_suffix}</sup>", wmo)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                     
                 c4, c5, c6 = st.columns(3)
                 with c4:
                     fig = plot_utils.create_section_chart(dates, pres, rho, "Potential Density (kg/m³)", f"Section chart RHO<br><sup>{date_suffix}</sup>", wmo)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 with c5:
                     fig = plot_utils.create_overlaid_profiles(temp, pres, cycles, "Temperature (°C)", f"Overlaid profiles TEMP<br><sup>{date_suffix}</sup>", wmo)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 with c6:
                     fig = plot_utils.create_overlaid_profiles(psal, pres, cycles, "Salinity (PSU)", f"Overlaid profiles PSAL<br><sup>{date_suffix}</sup>", wmo)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                     
                 c7, c8, c9 = st.columns(3)
                 with c7:
                     fig = plot_utils.create_overlaid_profiles(rho, pres, cycles, "Potential Density (kg/m³)", f"Overlaid profiles RHO<br><sup>{date_suffix}</sup>", wmo)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
             else:
                 st.info("No valid profile data available for technical plots.")
         except Exception as e:
@@ -933,7 +942,7 @@ with st.sidebar:
     st.markdown("## 🔍 Filters")
 
     # ── Refresh ──
-    if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
+    if st.button("🔄 Refresh Data", width="stretch", type="primary"):
         for f in CACHE_DIR.glob("*.parquet"):
             f.unlink()
         st.cache_data.clear()
@@ -1376,7 +1385,7 @@ with col_left:
             )
             
         fig_map.update_layout(height=620)
-        st.plotly_chart(fig_map, use_container_width=True, key="main_map", on_select="rerun", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_float_map"}})
+        st.plotly_chart(fig_map, width="stretch", key="main_map", on_select="rerun", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_float_map"}})
         
         if selected_wmo_from_map:
             if st.button(f"📄 View Info for Float {selected_wmo_from_map}"):
@@ -1468,7 +1477,7 @@ with col_right:
                     margin=dict(l=50, r=20, t=80, b=40),
                 )
             )
-            st.plotly_chart(fig_bar, use_container_width=True, key="bar_chart", on_select="rerun", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_annual_floats"}})
+            st.plotly_chart(fig_bar, width="stretch", key="bar_chart", on_select="rerun", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_annual_floats"}})
         else:
             st.info("No active float data for bar chart.")
     else:
@@ -1571,7 +1580,7 @@ with col_tree:
                 **_dark_layout(margin=dict(l=0, r=0, t=10, b=0)),
                 coloraxis_showscale=False,
             )
-            st.plotly_chart(fig_tree, use_container_width=True, key="treemap", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_last1day_treemap"}})
+            st.plotly_chart(fig_tree, width="stretch", key="treemap", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_last1day_treemap"}})
         else:
             st.info("No active floats in the last 1 day for current filters.")
     else:
@@ -1653,7 +1662,7 @@ with col_donut:
                     bgcolor="rgba(0,0,0,0)",
                 ),
             )
-            st.plotly_chart(fig_donut, use_container_width=True, key="donut", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_age_distribution"}})
+            st.plotly_chart(fig_donut, width="stretch", key="donut", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_age_distribution"}})
         else:
             st.info("No age data available.")
     else:
@@ -1718,7 +1727,7 @@ with col_profiler:
                 bgcolor="rgba(0,0,0,0)",
             ),
         )
-        st.plotly_chart(fig_ptype, use_container_width=True, key="profiler_donut", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_profiler_types"}})
+        st.plotly_chart(fig_ptype, width="stretch", key="profiler_donut", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_profiler_types"}})
         st.caption(f"📋 {len(df_meta):,} floats across {df_meta['profiler_name'].nunique()} instrument models (source: ar_index_global_meta.txt)")
     else:
         st.info("No metadata available.")
@@ -1768,7 +1777,7 @@ with col_fleet:
                     margin=dict(l=50, r=20, t=60, b=40),
                 ),
             )
-            st.plotly_chart(fig_fleet, use_container_width=True, key="fleet_composition", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_fleet_composition"}})
+            st.plotly_chart(fig_fleet, width="stretch", key="fleet_composition", config={"toImageButtonOptions": {"format": "png", "scale": 2, "filename": "argo_fleet_composition"}})
             st.caption("Shows how the fleet instrument mix has evolved per deployment year")
         else:
             st.info("No deployment data available.")
@@ -1868,7 +1877,7 @@ if len(df_prof) > 0:
                 height=160,
             )
         )
-        st.plotly_chart(fig_global, use_container_width=True, key="global_status_bar", config={"displayModeBar": False})
+        st.plotly_chart(fig_global, width="stretch", key="global_status_bar", config={"displayModeBar": False})
 
     with col_dac2:
         st.markdown("### 📡 Float Status Summary")
@@ -2168,7 +2177,7 @@ with st.expander("📋 View Raw Data", expanded=False):
     tab1, tab2, tab3 = st.tabs(["Core Profiles", "BGC Profiles", "Float Metadata"])
     with tab1:
         st.dataframe(
-            filt_prof.head(200), use_container_width=True, hide_index=True
+            filt_prof.head(200), width="stretch", hide_index=True
         )
         st.caption(
             f"Showing {min(200, len(filt_prof)):,} of {len(filt_prof):,} records"
@@ -2182,7 +2191,7 @@ with st.expander("📋 View Raw Data", expanded=False):
         )
     with tab2:
         st.dataframe(
-            filt_bio.head(200), use_container_width=True, hide_index=True
+            filt_bio.head(200), width="stretch", hide_index=True
         )
         st.caption(
             f"Showing {min(200, len(filt_bio)):,} of {len(filt_bio):,} records"
@@ -2196,7 +2205,7 @@ with st.expander("📋 View Raw Data", expanded=False):
         )
     with tab3:
         st.dataframe(
-            df_meta.head(500), use_container_width=True, hide_index=True
+            df_meta.head(500), width="stretch", hide_index=True
         )
         st.caption(
             f"Showing {min(500, len(df_meta)):,} of {len(df_meta):,} float metadata records (source: ar_index_global_meta.txt)"

@@ -115,7 +115,7 @@ with col1:
         mapbox=dict(center=dict(lat=-10, lon=80), zoom=3)
     )
 
-    st.plotly_chart(fig_map, use_container_width=True)
+    st.plotly_chart(fig_map, width="stretch")
 
 # ---------------- KPI ----------------
 with col2:
@@ -148,4 +148,4 @@ fig_bar = px.bar(
     y="count"
 )
 
-st.plotly_chart(fig_bar, use_container_width=True)
+st.plotly_chart(fig_bar, width="stretch")

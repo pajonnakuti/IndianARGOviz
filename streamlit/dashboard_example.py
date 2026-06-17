@@ -239,7 +239,7 @@ with col1:
     for _, r in totals.iterrows():
         fig_bar.add_annotation(x=r['Year'], y=r['Total_Floats'], text=str(int(r['Total_Floats'])), showarrow=False, yshift=10)
     fig_bar.update_layout(barmode='stack', xaxis=dict(dtick=1), height=520)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
 # Donut chart: age distribution of alive floats (bio dataset)
 with col2:
@@ -255,7 +255,7 @@ with col2:
         if not age_counts.empty:
             fig_donut = px.pie(age_counts, names='Age_Years', values='Count', hole=0.55, title='Age (years) distribution of alive floats')
             fig_donut.update_traces(textinfo='percent+label')
-            st.plotly_chart(fig_donut, use_container_width=True)
+            st.plotly_chart(fig_donut, width="stretch")
         else:
             st.write("No alive float age groups available for selected filters.")
     else:
@@ -331,7 +331,7 @@ else:
     )
 
     fig_map.update_layout(height=650)
-    st.plotly_chart(fig_map, use_container_width=True)
+    st.plotly_chart(fig_map, width="stretch")
 # ------------------------------
 # DAC summary table (bio dataset) - bottom
 # Live = age_days >= 90, Dead = age_days < 90, Total = unique floats
@@ -352,7 +352,7 @@ summary_table = g.groupby('DAC').agg(
 
 # present in requested order: DAC | Live | Dead | Total
 summary_table = summary_table[['DAC','Live','Dead','Total']]
-st.dataframe(summary_table, use_container_width=True)
+st.dataframe(summary_table, width="stretch")
 
 # Compact text lines
 st.markdown("**Compact summary (DAC — Live / Dead / Total)**")
