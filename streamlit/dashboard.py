@@ -902,8 +902,8 @@ st.iframe(
     })();
     </script>
     """,
-    height=0,
-    width=0
+    height=1,
+    width=1
 )
 
 with st.sidebar:
