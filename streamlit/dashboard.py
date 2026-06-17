@@ -16,7 +16,6 @@ Components
 
 # ==================== IMPORTS ====================
 import streamlit as st
-import streamlit.components.v1 as components
 import os
 import pandas as pd
 import numpy as np
@@ -860,7 +859,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-reset_trigger = st.text_input("", placeholder="reset_trigger_placeholder", key="reset_trigger")
+reset_trigger = st.text_input("Reset Trigger", placeholder="reset_trigger_placeholder", key="reset_trigger", label_visibility="collapsed")
 
 if reset_trigger == "true":
     if "main_map" in st.session_state:
@@ -875,7 +874,7 @@ if reset_trigger == "true":
     st.session_state.reset_trigger = ""
     st.rerun()
 
-components.html(
+st.iframe(
     """
     <script>
     (function() {
